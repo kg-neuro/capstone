@@ -1,7 +1,9 @@
 # Capstone Research
 ### Info
 Updated: October 2024
+
 Advisor: Arjun Manrai, PhD
+
 Institution: Harvard Medical School
 
 ### Abstract
