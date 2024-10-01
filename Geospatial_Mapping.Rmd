@@ -1,0 +1,182 @@
+---
+title: "Geospatial Mapping"
+author: "Kyla Gabriel"
+output: html_notebook
+---
+
+# Table of Contents
+1) Data Cleaning
+2) Data Visualization
+
+## Load in Libraries
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(reshape2)
+library(sf)
+library(tigris)
+library(VIM)
+library(viridis)
+```
+
+# 1) Data Cleaning
+```{r}
+# Do not run cell if you have cons_df.csv file 
+# Load in data
+var <- as.data.frame(read.csv("ahrq_var.csv"), header=T)
+data <- as.data.frame(read.csv("ahrq_data.csv"), header=T)
+
+# Create df with necessary variables
+cons_df <- data %>%
+  filter(TERRITORY == 0) %>%
+  select(YEAR, STATE, COUNTY, REGION, TERRITORY, ACS_TOT_POP_ABOVE25, 
+         CEN_POPDENSITY_TRACT, ACS_MEDIAN_AGE, ACS_PCT_FEMALE, ACS_PCT_MALE, 
+         ACS_PCT_ASIAN, ACS_PCT_BLACK, ACS_PCT_HISPANIC,  ACS_PCT_WHITE, 
+         ACS_PCT_NHPI, ACS_PCT_MULT_RACE,  ACS_PCT_OTHER_RACE, ACS_PCT_UNEMPLOY, 
+         ACS_GINI_INDEX, ACS_AVG_HH_SIZE, ACS_MEDIAN_HH_INC, 
+         ACS_PCT_RENTER_HU_COST_50PCT, ACS_PCT_INC50, ACS_PCT_HS_GRADUATE, 
+         ACS_PCT_LT_HS, ACS_PCT_COMMT_60MINUP, ACS_PCT_MEDICAID_ANY, 
+         HIFLD_DIST_UC_TRACT) %>%
+  rename(year=YEAR, state=STATE, county=COUNTY, region=REGION, territory=TERRITORY, 
+         pop_above25=ACS_TOT_POP_ABOVE25, pop_density=CEN_POPDENSITY_TRACT, 
+         avg_age=ACS_MEDIAN_AGE,per_female=ACS_PCT_FEMALE, per_male=ACS_PCT_MALE, 
+         per_asian=ACS_PCT_ASIAN, per_black=ACS_PCT_BLACK, 
+         per_hispanic=ACS_PCT_HISPANIC, per_white=ACS_PCT_WHITE, 
+         per_native=ACS_PCT_NHPI, per_multi=ACS_PCT_MULT_RACE,
+         per_other=ACS_PCT_OTHER_RACE, per_unemployed=ACS_PCT_UNEMPLOY, 
+         gini_index=ACS_GINI_INDEX, avg_Hsize=ACS_AVG_HH_SIZE, 
+         median_Hincome=ACS_MEDIAN_HH_INC, per_rent50=ACS_PCT_RENTER_HU_COST_50PCT, 
+         per_poverty50=ACS_PCT_INC50, per_gradHS=ACS_PCT_HS_GRADUATE, 
+         per_lessHS=ACS_PCT_LT_HS, per_commute60=ACS_PCT_COMMT_60MINUP, 
+         per_medicaid=ACS_PCT_MEDICAID_ANY, urgcare_dist=HIFLD_DIST_UC_TRACT) %>%
+  distinct()
+
+
+
+```
+
+```{r}
+write.csv(cons_df, file="cons_df.csv", row.names=T)
+```
+
+# 2) Data Distribution 
+```{r}
+# Plot state distributions
+ggplot(cons_df, aes(x=state)) +
+  geom_bar() +
+  xlab("States") +
+  ylab("Frequency") +
+  ggtitle("Frequency Count of US States") +
+  theme(axis.text.x = element_text(angle = 90))
+
+# Evaluate missing values 
+na_per_col <- sapply(cons_df, function(x) sum(is.na(x)))
+missing_data <- data.frame(
+  Column = names(na_per_col),
+  MissingCount = na_per_col)
+
+ggplot(missing_data, aes(x = Column, y = MissingCount)) +
+  geom_bar(stat = "identity", fill = "gray") +
+  xlab("SDOH Variables") +
+  ylab("Count") +
+  ggtitle("Histogram of Missing Values") +
+  theme(axis.text.x = element_text(angle = 90))  
+```
+
+```{r}
+# Impute for missing data
+df_imputed <- kNN(cons_df, k = 5)
+df_imputed <- df_imputed %>% select(-contains("_imp"))
+
+# Normalize (scale) the data
+df_scaled <- scale(df_imputed)
+
+# Check for missing values after imputation
+colSums(is.na(df_scaled))
+
+# View scaled data
+print(df_scaled)
+```
+
+```{r}
+# Create histograms
+cons_df_melted <- melt(cons_df, variable.name = "Column", value.name = "Value")
+histogram_plot <- ggplot(cons_df_melted, aes(x = Value)) +
+  geom_histogram(binwidth = 10, fill = "skyblue", color = "black") +
+  facet_wrap(~ Column, scales = "free") +
+  xlab("Value") +
+  ylab("Frequency") +
+  ggtitle("Histograms of Selected Columns") +
+  theme_minimal()
+
+numeric_cols <- cons_df %>% select_if(is.numeric)
+histograms <- lapply(names(numeric_cols), function(col) {
+  ggplot(cons_df, aes_string(x = col)) +
+    geom_histogram(binwidth = 30, fill = "blue", color = "black", alpha = 0.7) +
+    labs(title = paste("Histogram of", col), x = col, y = "Frequency") +
+    theme_minimal()})
+
+# Create boxplots
+boxplots <- lapply(names(numeric_cols), function(col) {
+  ggplot(cons_df, aes_string(y = col)) +
+    geom_boxplot(fill = "orange", color = "black", alpha = 0.7) +
+    labs(title = paste("Boxplot of", col), x = "", y = col) +
+    theme_minimal()})
+
+# Print histograms and boxplots
+print(histogram_plot)
+
+for (plot in histograms) {
+  print(plot)}
+
+for (plot in boxplots) {
+  print(plot)}
+
+```
+
+
+3) Heatmap
+```{r}
+# Download US county shapefile data
+options(tigris_use_cache = TRUE)
+counties <- counties(cb = TRUE, resolution = "20m", year = 2020)
+
+# Merge data
+merged_data <- counties %>%
+  left_join(cons_df, by = c("GEOID" = "county"))  
+
+# Create heatmap
+ggplot(merged_data) +
+  geom_sf(aes(fill = per_medicaid), color = NA) +  
+  scale_fill_viridis_c(option = "plasma", na.value = "grey50") +  
+  theme_minimal() +
+  labs(title = "US County Level Heatmap",
+       fill = "Percent of Individuals on Medicaid")  
+  theme(
+    panel.background = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank())
+
+```
+```{r}
+maps::county.fips %>%
+  as_tibble() %>%
+  extract(polyname, c("region", "subregion"), "^([^,]+),([^,]+)$") -> dfips
+
+# Get county map data and merge with dfips
+map_data("county") %>% left_join(dfips, by = c("region", "subregion")) -> data
+cons_df$county <- as.integer(cons_df$county)
+data <- left_join(data, cons_df, by = c("fips" = "county"))
+
+# Plot the map with the per_medicaid variable
+data %>%
+  ggplot(aes(long, lat, group = group)) +
+  geom_polygon(aes(fill = per_medicaid), color = NA) +
+  coord_map() +
+  theme_void() +
+  scale_fill_viridis_c(option = "A") +
+  ggtitle("Medicaid Coverage by County in the United States", subtitle = "Data from AHRQ")
+
+```
+
+
